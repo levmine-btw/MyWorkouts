@@ -27,6 +27,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Row
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Close
@@ -39,6 +40,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.text.input.KeyboardType
 import kotlin.collections.emptyList
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.savedstate.serialization.saved
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,6 +59,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
+                    var savedWorkouts by remember { mutableStateOf<List<SavedWorkout>>(emptyList()) }
 
                     NavHost(
                         navController = navController,
@@ -59,13 +69,20 @@ class MainActivity : ComponentActivity() {
                             WorkoutsApp(
                                 onNavigateToWorkout = {
                                     navController.navigate("workout")
-                                }
+                                },
+                                savedWorkouts = savedWorkouts
                             )
                         }
 
                         composable("workout") {
                             WorkoutScreen(
-                                onBackClick = {
+                                onBackClick = { navController.popBackStack() },
+                                onWorkoutSaved = { name, data ->
+                                    val newWorkout = SavedWorkout(
+                                        name = name,
+                                        exercises = data.keys.toList()
+                                    )
+                                    savedWorkouts = savedWorkouts + newWorkout
                                     navController.popBackStack()
                                 }
                             )
@@ -78,10 +95,22 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun WorkoutsApp(onNavigateToWorkout: () -> Unit) {
-    val workouts = listOf<String>()
+data class SetData(
+    val reps: Int = 0,
+    val weight: String = ""
+)
 
+data class SavedWorkout(
+    val name: String,
+    val exercises: List<String>,
+    val date: Long = System.currentTimeMillis()
+)
+
+@Composable
+fun WorkoutsApp(
+    onNavigateToWorkout: () -> Unit,
+    savedWorkouts: List<SavedWorkout>
+) {
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -92,19 +121,57 @@ fun WorkoutsApp(onNavigateToWorkout: () -> Unit) {
             modifier = Modifier.padding(top = 32.dp, bottom = 16.dp)
         )
 
+        val currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
+
+        Text(
+            text = currentDate,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
         Box(
             modifier = Modifier.weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            if (workouts.isEmpty()) {
+            if (savedWorkouts.isEmpty()) {
                 Text(
                     text = "Пока нет тренировок",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                Text("Список тренировок")
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(savedWorkouts.size) { index ->
+                        val workout = savedWorkouts[index]
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {  }
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = workout.name,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+
+                                if (workout.exercises.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = workout.exercises.joinToString(" | "),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+
         Button(
             onClick = onNavigateToWorkout,
             modifier = Modifier
@@ -119,30 +186,37 @@ fun WorkoutsApp(onNavigateToWorkout: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkoutScreen(
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onWorkoutSaved: (name: String, data: Map<String, List<SetData>>) -> Unit
 ) {
-    var workoutData by remember { mutableStateOf<Map<String, List<Int>>>(emptyMap()) }
-    var selectedExercise by remember {mutableStateOf<String?>(null)}
-    val currentSets = selectedExercise?.let { workoutData[it] ?: emptyList() } ?: emptyList()
+    var workoutData by remember { mutableStateOf<Map<String, List<SetData>>>(emptyMap()) }
     var showExerciseDialog by remember {mutableStateOf(false)}
-
     var expandedExercise by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
     val allExercises = workoutData.keys.toList()
+
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var workoutName by remember { mutableStateOf("") }
 
     fun toggleExpand(exercise: String) {
         expandedExercise = if (expandedExercise == exercise) { null } else { exercise }
     }
     fun addSetForExercise(exercise: String) {
        val currentList = workoutData[exercise] ?: emptyList()
-        workoutData = workoutData + (exercise to currentList + 0)
+        workoutData = workoutData + (exercise to currentList + SetData(weight = ""))
     }
 
-    fun updateSetForExercise(exercise: String, index: Int, value: Int) {
+    fun updateSetReps(exercise: String, index: Int, value: Int) {
         val currentList = workoutData[exercise] ?: emptyList()
-        val newList = currentList.toMutableList().apply {
-            if (index < size) { this[index] = value } else { add(value) }
-        }
+        val newData = currentList[index].copy(reps = value)
+        val newList = currentList.toMutableList().apply { this[index] = newData }
+        workoutData = workoutData + (exercise to newList)
+    }
+
+    fun updateSetWeight(exercise: String, index: Int, value: String) {
+        val currentList = workoutData[exercise] ?: emptyList()
+        val newData = currentList[index].copy(weight = value)
+        val newList = currentList.toMutableList().apply { this[index] = newData }
         workoutData = workoutData + (exercise to newList)
     }
 
@@ -151,6 +225,13 @@ fun WorkoutScreen(
         if (index < currentList.size) {
             val newList = currentList.toMutableList().apply { removeAt(index) }
             workoutData = workoutData + (exercise to newList)
+        }
+    }
+
+    fun saveWorkout() {
+        if (workoutName.isNotBlank()) {
+            onWorkoutSaved(workoutName, workoutData)
+            showSaveDialog = false
         }
     }
 
@@ -186,12 +267,12 @@ fun WorkoutScreen(
                         .fillMaxWidth()
                         .animateContentSize()
                         .padding(vertical = 4.dp),
-                    onClick = { toggleExpand(exercise) }
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clickable { toggleExpand(exercise) }
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -212,27 +293,54 @@ fun WorkoutScreen(
                             Divider()
 
                             val sets = workoutData[exercise] ?: emptyList()
-                            sets.forEachIndexed { index, reps ->
+                            sets.forEachIndexed { index, set ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 16.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    OutlinedTextField(
-                                        value = if (reps == 0) "" else reps.toString(),
-                                        onValueChange = { text ->
-                                            updateSetForExercise(exercise, index, text.toIntOrNull() ?: 0)
-                                        },
-                                        label = { Text("Подход ${index + 1}") },
-                                        modifier = Modifier.weight(1f),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                    Text(
+                                        text = "${index + 1}.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.width(24.dp)
                                     )
 
-                                    Text("повт.", modifier = Modifier.padding(horizontal = 8.dp))
+                                    OutlinedTextField(
+                                        value = if (set.reps == 0) "" else set.reps.toString(),
+                                        onValueChange = { text ->
+                                            val newReps = text.toIntOrNull() ?: 0
+                                            updateSetReps(exercise, index, text.toIntOrNull() ?: 0)
+                                        },
+                                        modifier = Modifier.weight(0.3f),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true
+                                    )
 
-                                    IconButton(onClick = { removeSetForExercise(exercise, index) }) {
-                                        Icon(Icons.Default.Close, "Удалить подход")
+                                    Text("повт.", modifier = Modifier.padding(horizontal = 4.dp))
+
+                                    OutlinedTextField(
+                                        value = set.weight,
+                                        onValueChange = { text ->
+                                            if (text.all { it.isDigit() || it == '.' }) {
+                                                if (text.count { it == '.'} <= 1) {
+                                                    updateSetWeight(exercise, index, text)
+                                                }
+                                            }
+                                        },
+                                        label = { Text("Вес") },
+                                        modifier = Modifier.weight(0.3f),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        singleLine = true
+                                    )
+
+                                    Text("кг.", modifier = Modifier.padding(start = 4.dp, end = 8.dp))
+
+                                    IconButton(
+                                        onClick = { removeSetForExercise(exercise, index) },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, "Удалить", modifier = Modifier.size(16.dp))
                                     }
                                 }
                             }
@@ -258,15 +366,50 @@ fun WorkoutScreen(
                 Text("Добавить упражнение")
             }
 
+            Button(
+                onClick = { showSaveDialog = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+            ) {
+                Text("Сохранить тренировку")
+            }
+
+            if (showSaveDialog) {
+                AlertDialog(
+                    onDismissRequest = { showSaveDialog = false },
+                    title = { Text("Название тренировки") },
+                    text = {
+                        OutlinedTextField(
+                            value = workoutName,
+                            onValueChange = {
+                                if (it.length <= 256) { workoutName = it }
+                            },
+                            label = { Text("Что было особенного?") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        Button(onClick = { saveWorkout() }) {
+                            Text("Сохранить")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showSaveDialog = false }) {
+                            Text("Отмена")
+                        }
+                    }
+                )
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
 
     val exercises = listOf(
-        "Подтягивания",
-        "Армрестлинг: крюк",
-        "Армрестлинг - верх",
-        "Армрестлинг - боковое давление"
+        "подтягивания",
+        "крюк",
+        "верх",
+        "боковое давление"
     )
 
     if (showExerciseDialog) {
@@ -281,7 +424,7 @@ fun WorkoutScreen(
                                 val exerciseName = exercise
 
                                 if(!workoutData.containsKey(exerciseName)) {
-                                    workoutData = workoutData + (exerciseName to emptyList<Int>())
+                                    workoutData = workoutData + (exerciseName to emptyList<SetData>())
                                     expandedExercise = exerciseName
                                 } else {
                                     expandedExercise = exerciseName
