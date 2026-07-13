@@ -1,80 +1,120 @@
 package com.example.myworkouts
 
-import android.health.connect.datatypes.ExerciseLap
+import android.graphics.Paint
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.example.myworkouts.ui.theme.MyWorkoutsTheme
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Text
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.Row
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.ui.text.input.KeyboardType
-import kotlin.collections.emptyList
-import androidx.compose.runtime.remember
-import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.material3.Text
 import androidx.compose.ui.text.style.TextAlign
-import androidx.savedstate.serialization.saved
+import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.example.myworkouts.ui.theme.MyWorkoutsTheme
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-
+import java.util.Locale
+import androidx.compose.material3.*
+import androidx.savedstate.serialization.saved
+import java.time.Instant
+import java.time.YearMonth
+import java.time.ZoneId
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Color
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MyWorkoutsTheme() {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val navController = rememberNavController()
-                    var savedWorkouts by remember { mutableStateOf<List<SavedWorkout>>(emptyList()) }
+                val navController = rememberNavController()
+                var savedWorkouts by remember { mutableStateOf<List<SavedWorkout>>(emptyList()) }
+
+                Scaffold(
+                    bottomBar = {
+                        NavigationBar {
+                            val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+
+                            bottomNavItems.forEach { screen ->
+                                NavigationBarItem(
+                                    icon = { Icon(screen.icon, contentDescription = screen.title) },
+                                    label = { Text(screen.title) },
+                                    selected = currentRoute == screen.route,
+                                    onClick = {
+                                        navController.navigate(screen.route) {
+                                            popUpTo(Screen.Workouts.route) { saveState = true }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                ) { innerPadding ->
 
                     NavHost(
                         navController = navController,
-                        startDestination = "home"
+                        startDestination = Screen.Workouts.route,
+                        modifier = Modifier.padding(innerPadding)
                     ) {
-                        composable("home") {
+                        composable(Screen.Workouts.route) {
                             WorkoutsApp(
                                 onNavigateToWorkout = {
-                                    navController.navigate("workout")
+                                    navController.navigate("workout_detail")
                                 },
                                 savedWorkouts = savedWorkouts
                             )
                         }
 
-                        composable("workout") {
+                        composable(Screen.Calendar.route) {
+                            CalendarScreen(
+                                savedWorkouts = savedWorkouts,
+                                onDayClick = { date ->
+                                    println("Выбрана дата $date")
+                                }
+                            )
+                        }
+
+                        composable(Screen.Records.route) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Рекорды")
+                            }
+                        }
+
+                        composable("workout_detail") {
                             WorkoutScreen(
                                 onBackClick = { navController.popBackStack() },
                                 onWorkoutSaved = { name, data ->
@@ -90,7 +130,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-
         }
     }
 }
@@ -105,6 +144,14 @@ data class SavedWorkout(
     val exercises: List<String>,
     val date: Long = System.currentTimeMillis()
 )
+
+sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
+    object Workouts : Screen("workouts", "Тренировки", Icons.Default.Favorite)
+    object Calendar : Screen("calendar", "Календарь", Icons.Default.DateRange)
+    object Records : Screen("records", "Рекорды", Icons.Default.Star)
+}
+
+val bottomNavItems = listOf(Screen.Workouts, Screen.Calendar, Screen.Records)
 
 @Composable
 fun WorkoutsApp(
@@ -242,7 +289,7 @@ fun WorkoutScreen(
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Назад"
                         )
                     }
@@ -441,5 +488,120 @@ fun WorkoutScreen(
             },
             confirmButton = {}
         )
+    }
+}
+
+fun generateCalendarDays(yearMonth: YearMonth): List<LocalDate?> {
+    val firstDayOfMonth = yearMonth.atDay(1)
+    val daysInMonth = yearMonth.lengthOfMonth()
+
+    val dayOfWeek = firstDayOfMonth.dayOfWeek.value
+    val calendarDays = mutableListOf<LocalDate?>()
+
+    repeat(dayOfWeek - 1) {
+        calendarDays.add(null)
+    }
+
+    for (day in 1..daysInMonth) {
+        calendarDays.add(yearMonth.atDay(day))
+    }
+
+    return calendarDays
+}
+
+@Composable
+fun CalendarScreen(
+    savedWorkouts: List<SavedWorkout>,
+    onDayClick: (LocalDate) -> Unit
+) {
+    val today = LocalDate.now()
+    var currentMonth by remember { mutableStateOf(YearMonth.from(today)) }
+    val calendarDays = generateCalendarDays(currentMonth)
+    val workoutDates = remember(savedWorkouts) {
+        savedWorkouts.map {
+            Instant.ofEpochMilli(it.date).atZone(ZoneId.systemDefault()).toLocalDate()
+        }.toSet()
+    }
+
+    Column( modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { currentMonth = currentMonth.minusMonths(1) }) {
+                Icon(Icons.Default.ArrowBack, "Предыдущий месяц")
+            }
+
+            val monthName = currentMonth.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale("ru")))
+
+            Text(
+                text = monthName,
+                style = MaterialTheme.typography.titleLarge
+            )
+
+            IconButton(onClick = { currentMonth = currentMonth.plusMonths(1) }) {
+                Icon(Icons.Default.ArrowForward, "Следующий месяц")
+                }
+        }
+
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach { day ->
+                Text(
+                    text = day,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(7),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            items(calendarDays.size) { index ->
+                val date = calendarDays[index]
+
+                if (date == null) {
+                    Box(modifier = Modifier.aspectRatio(1f))
+                } else {
+                    val isToday = date == today
+                    val hasWorkout = workoutDates.contains(date)
+
+                    Card(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clickable { onDayClick(date) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = when {
+                                isToday -> MaterialTheme.colorScheme.primaryContainer
+                                hasWorkout -> Color.Green.copy(alpha = 0.2f)
+                                else -> MaterialTheme.colorScheme.surface
+                            }
+                        )
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = date.dayOfMonth.toString(),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (hasWorkout) { Color.Green } else { MaterialTheme.colorScheme.onSurface }
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
