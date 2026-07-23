@@ -190,6 +190,7 @@ class MainActivity : ComponentActivity() {
 }
 
 
+// Главный экран
 @Composable
 fun WorkoutsApp(
     navController: NavController,
