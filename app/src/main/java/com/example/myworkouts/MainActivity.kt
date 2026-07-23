@@ -48,6 +48,9 @@ import androidx.compose.ui.layout.ModifierLocalBeyondBoundsLayout
 import androidx.compose.ui.draw.clip
 
 
+// Импорты
+
+
 data class SetData(val reps: Int = 0, val weight: String = "")
 
 data class SavedWorkout(
