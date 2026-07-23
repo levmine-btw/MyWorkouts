@@ -1,61 +1,77 @@
 package com.example.myworkouts
 
-import android.graphics.Paint
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.annotation.RequiresApi
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.material3.Text
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.myworkouts.ui.theme.MyWorkoutsTheme
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.util.Locale
-import androidx.compose.material3.*
-import androidx.savedstate.serialization.saved
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.graphics.Color
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.absoluteValue
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.layout.ModifierLocalBeyondBoundsLayout
+import androidx.compose.ui.draw.clip
+
+
+data class SetData(val reps: Int = 0, val weight: String = "")
+
+data class SavedWorkout(
+    val name: String,
+    val exercises: List<String>,
+    val date: Long,
+    val setsData: Map<String, List<SetData>> = emptyMap()
+)
+
+data class CalendarWeek(val days: List<LocalDate?>)
+
+sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
+    object Workouts : Screen("workouts", "Тренировки", Icons.Default.Favorite)
+    object Calendar : Screen("calendar", "Календарь", Icons.Default.DateRange)
+    object Records : Screen("records", "Рекорды", Icons.Default.Star)
+}
+
+val bottomNavItems = listOf(Screen.Workouts, Screen.Calendar, Screen.Records)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MyWorkoutsTheme() {
+            MyWorkoutsTheme {
                 val navController = rememberNavController()
                 var savedWorkouts by remember { mutableStateOf<List<SavedWorkout>>(emptyList()) }
 
@@ -63,7 +79,6 @@ class MainActivity : ComponentActivity() {
                     bottomBar = {
                         NavigationBar {
                             val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
-
                             bottomNavItems.forEach { screen ->
                                 NavigationBarItem(
                                     icon = { Icon(screen.icon, contentDescription = screen.title) },
@@ -81,50 +96,90 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 ) { innerPadding ->
-
                     NavHost(
                         navController = navController,
                         startDestination = Screen.Workouts.route,
                         modifier = Modifier.padding(innerPadding)
                     ) {
+
                         composable(Screen.Workouts.route) {
-                            WorkoutsApp(
-                                onNavigateToWorkout = {
-                                    navController.navigate("workout_detail")
-                                },
-                                savedWorkouts = savedWorkouts
-                            )
+                            WorkoutsApp(navController = navController, savedWorkouts = savedWorkouts)
                         }
 
                         composable(Screen.Calendar.route) {
-                            CalendarScreen(
-                                savedWorkouts = savedWorkouts,
-                                onDayClick = { date ->
-                                    println("Выбрана дата $date")
-                                }
-                            )
+                            CalendarScreen(savedWorkouts = savedWorkouts) { date ->
+                                navController.navigate("day_workouts/${date.toString()}")
+                            }
                         }
 
                         composable(Screen.Records.route) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("Рекорды")
                             }
                         }
 
-                        composable("workout_detail") {
+                        composable("workout_detail/{date}") { backStackEntry ->
+                            val dateString = backStackEntry.arguments?.getString("date") ?: LocalDate.now().toString()
+                            val workoutDate = LocalDate.parse(dateString)
                             WorkoutScreen(
                                 onBackClick = { navController.popBackStack() },
                                 onWorkoutSaved = { name, data ->
-                                    val newWorkout = SavedWorkout(
+                                    val dateMillis = workoutDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                                    savedWorkouts += SavedWorkout(
                                         name = name,
-                                        exercises = data.keys.toList()
+                                        exercises = data.keys.toList(),
+                                        date = dateMillis,
+                                        setsData = data
                                     )
-                                    savedWorkouts = savedWorkouts + newWorkout
                                     navController.popBackStack()
                                 }
+                            )
+                        }
+
+                        composable("workout_detail_view/{date}/{name}") { backStackEntry ->
+                            val dateString = backStackEntry.arguments?.getString("date") ?: ""
+                            val name = backStackEntry.arguments?.getString("name") ?: ""
+                            val coroutineScope = rememberCoroutineScope()
+
+                            val dayStart = LocalDate.parse(dateString).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                            val dayEnd = dayStart + 24 * 60 * 60 * 1000
+
+                            val workout = savedWorkouts.firstOrNull {
+                                it.date >= dayStart && it.date < dayEnd && it.name == name
+                            }
+
+                            if (workout != null) {
+                                WorkoutScreen(
+                                    onBackClick = { navController.popBackStack() },
+                                    initialData = workout.name to workout.exercises,
+                                    initialSetsData = workout.setsData,
+                                    isEditing = true,
+                                    onWorkoutSaved = { updatedName, updatedData ->
+                                        savedWorkouts = savedWorkouts.map { w ->
+                                            if (w.date == workout.date && w.name == workout.name) {
+                                                SavedWorkout(updatedName, updatedData.keys.toList(), w.date, updatedData)
+                                            } else w
+                                        }
+                                        coroutineScope.launch {
+                                            delay(300)
+                                            navController.popBackStack()
+                                        }
+                                    }
+                                )
+                            } else {
+                                LaunchedEffect(Unit) { navController.popBackStack() }
+                            }
+                        }
+
+                        composable("day_workouts/{date}") { backStackEntry ->
+                            val dateString = backStackEntry.arguments?.getString("date") ?: ""
+                            val selectedDate = LocalDate.parse(dateString)
+                            DayWorkoutsScreen(
+                                navController = navController,
+                                date = selectedDate,
+                                savedWorkouts = savedWorkouts,
+                                onBackClick = { navController.popBackStack() },
+                                onAddWorkout = { navController.navigate("workout_detail/${selectedDate.toString()}") }
                             )
                         }
                     }
@@ -134,30 +189,21 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-data class SetData(
-    val reps: Int = 0,
-    val weight: String = ""
-)
-
-data class SavedWorkout(
-    val name: String,
-    val exercises: List<String>,
-    val date: Long = System.currentTimeMillis()
-)
-
-sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
-    object Workouts : Screen("workouts", "Тренировки", Icons.Default.Favorite)
-    object Calendar : Screen("calendar", "Календарь", Icons.Default.DateRange)
-    object Records : Screen("records", "Рекорды", Icons.Default.Star)
-}
-
-val bottomNavItems = listOf(Screen.Workouts, Screen.Calendar, Screen.Records)
 
 @Composable
 fun WorkoutsApp(
-    onNavigateToWorkout: () -> Unit,
+    navController: NavController,
     savedWorkouts: List<SavedWorkout>
 ) {
+    val today = LocalDate.now()
+
+    val dayStart = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    val dayEnd = dayStart + 24 * 60 * 60 * 1000
+
+    val todayWorkouts = savedWorkouts.filter {
+        it.date >= dayStart && it.date < dayEnd
+    }
+
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -181,7 +227,7 @@ fun WorkoutsApp(
             modifier = Modifier.weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            if (savedWorkouts.isEmpty()) {
+            if (todayWorkouts.isEmpty()) {
                 Text(
                     text = "Пока нет тренировок",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -192,11 +238,11 @@ fun WorkoutsApp(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(savedWorkouts.size) { index ->
-                        val workout = savedWorkouts[index]
+                    items(todayWorkouts.size) { index ->
+                        val workout = todayWorkouts[index]
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = {  }
+                            onClick = { navController.navigate("workout_detail_view/${today}/${workout.name}") }
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
@@ -220,7 +266,9 @@ fun WorkoutsApp(
         }
 
         Button(
-            onClick = onNavigateToWorkout,
+            onClick = {
+                navController.navigate("workout_detail/${today}")
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
@@ -234,22 +282,34 @@ fun WorkoutsApp(
 @Composable
 fun WorkoutScreen(
     onBackClick: () -> Unit,
-    onWorkoutSaved: (name: String, data: Map<String, List<SetData>>) -> Unit
+    onWorkoutSaved: ((String, Map<String, List<SetData>>) -> Unit)? = null,
+    initialData: Pair<String, List<String>>? = null,
+    initialSetsData: Map<String, List<SetData>>? = null,
+    isEditing: Boolean = true
 ) {
-    var workoutData by remember { mutableStateOf<Map<String, List<SetData>>>(emptyMap()) }
-    var showExerciseDialog by remember {mutableStateOf(false)}
+    var workoutData by remember {
+        mutableStateOf<Map<String, List<SetData>>>(
+            initialSetsData ?: (initialData?.second?.associateWith { emptyList<SetData>() } ?: emptyMap())
+        )
+    }
+
+    var showExerciseDialog by remember { mutableStateOf(false) }
     var expandedExercise by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
     val allExercises = workoutData.keys.toList()
 
     var showSaveDialog by remember { mutableStateOf(false) }
-    var workoutName by remember { mutableStateOf("") }
+    var workoutName by remember { mutableStateOf(initialData?.first ?: "") }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     fun toggleExpand(exercise: String) {
-        expandedExercise = if (expandedExercise == exercise) { null } else { exercise }
+        expandedExercise = if (expandedExercise == exercise) null else exercise
     }
+
     fun addSetForExercise(exercise: String) {
-       val currentList = workoutData[exercise] ?: emptyList()
+        val currentList = workoutData[exercise] ?: emptyList()
         workoutData = workoutData + (exercise to currentList + SetData(weight = ""))
     }
 
@@ -277,27 +337,53 @@ fun WorkoutScreen(
 
     fun saveWorkout() {
         if (workoutName.isNotBlank()) {
-            onWorkoutSaved(workoutName, workoutData)
+            onWorkoutSaved?.invoke(workoutName, workoutData)
             showSaveDialog = false
+
+            if (initialData != null) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = "Изменения прмиенены",
+                        duration = SnackbarDuration.Long
+                    )
+                    delay(3000)
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                }
+            }
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Новая тренировка") },
+                title = { Text(if (isEditing) "Тренировка" else "Просмотр") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Назад"
-                        )
+                        Icon(Icons.Default.ArrowBack, "Назад")
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            if (isEditing && initialData != null && onWorkoutSaved != null) {
+                FloatingActionButton(onClick = { saveWorkout() }) {
+                    Icon(Icons.Default.Check, "Применить изменения")
+                }
+            }
+        },
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    modifier = Modifier
+                        .padding(horizontal = 32.dp, vertical = 8.dp),
+                    containerColor = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    shape = RoundedCornerShape(16.dp)
+                )
+            }
         }
-    ) {
-        innerPadding ->
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -310,16 +396,16 @@ fun WorkoutScreen(
 
             allExercises.forEach { exercise ->
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateContentSize()
-                        .padding(vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { toggleExpand(exercise) }
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { toggleExpand(exercise) }
                                 .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -337,9 +423,9 @@ fun WorkoutScreen(
                         }
 
                         if (expandedExercise == exercise) {
-                            Divider()
-
+                            HorizontalDivider()
                             val sets = workoutData[exercise] ?: emptyList()
+
                             sets.forEachIndexed { index, set ->
                                 Row(
                                     modifier = Modifier
@@ -353,112 +439,119 @@ fun WorkoutScreen(
                                         modifier = Modifier.width(24.dp)
                                     )
 
-                                    OutlinedTextField(
-                                        value = if (set.reps == 0) "" else set.reps.toString(),
-                                        onValueChange = { text ->
-                                            val newReps = text.toIntOrNull() ?: 0
-                                            updateSetReps(exercise, index, text.toIntOrNull() ?: 0)
-                                        },
-                                        modifier = Modifier.weight(0.3f),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        singleLine = true
-                                    )
+                                    if (!isEditing) {
+                                        Text(
+                                            text = if (set.reps == 0) "" else set.reps.toString(),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.weight(0.3f)
+                                        )
+                                        Text("повт.", modifier = Modifier.padding(horizontal = 4.dp))
+                                        Text(
+                                            text = set.weight,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.weight(0.3f)
+                                        )
+                                        Text("кг.", modifier = Modifier.padding(start = 4.dp, end = 8.dp))
+                                    }
+                                    else {
+                                        OutlinedTextField(
+                                            value = if (set.reps == 0) "" else set.reps.toString(),
+                                            onValueChange = { text ->
+                                                updateSetReps(exercise, index, text.toIntOrNull() ?: 0)
+                                            },
+                                            modifier = Modifier.weight(0.3f),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            singleLine = true
+                                        )
+                                        Text("повт.", modifier = Modifier.padding(horizontal = 4.dp))
 
-                                    Text("повт.", modifier = Modifier.padding(horizontal = 4.dp))
-
-                                    OutlinedTextField(
-                                        value = set.weight,
-                                        onValueChange = { text ->
-                                            if (text.all { it.isDigit() || it == '.' }) {
-                                                if (text.count { it == '.'} <= 1) {
-                                                    updateSetWeight(exercise, index, text)
+                                        OutlinedTextField(
+                                            value = set.weight,
+                                            onValueChange = { text ->
+                                                if (text.all { it.isDigit() || it == '.' }) {
+                                                    if (text.count { it == '.' } <= 1) {
+                                                        updateSetWeight(exercise, index, text)
+                                                    }
                                                 }
-                                            }
-                                        },
-                                        label = { Text("Вес") },
-                                        modifier = Modifier.weight(0.3f),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        singleLine = true
-                                    )
+                                            },
+                                            label = { Text("Вес") },
+                                            modifier = Modifier.weight(0.3f),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                            singleLine = true
+                                        )
+                                        Text("кг.", modifier = Modifier.padding(start = 4.dp, end = 8.dp))
 
-                                    Text("кг.", modifier = Modifier.padding(start = 4.dp, end = 8.dp))
-
-                                    IconButton(
-                                        onClick = { removeSetForExercise(exercise, index) },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(Icons.Default.Close, "Удалить", modifier = Modifier.size(16.dp))
+                                        IconButton(
+                                            onClick = { removeSetForExercise(exercise, index) },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(Icons.Default.Close, "Удалить", modifier = Modifier.size(16.dp))
+                                        }
                                     }
                                 }
                             }
-
-                            TextButton(
-                                onClick = { addSetForExercise(exercise) },
-                                modifier = Modifier.align(Alignment.Start).padding(start = 16.dp, bottom = 8.dp)
-                            ) {
-                                Icon(Icons.Default.Add, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Новый подход")
+                            if (isEditing) {
+                                TextButton(
+                                    onClick = { addSetForExercise(exercise) },
+                                    modifier = Modifier.align(Alignment.Start).padding(start = 16.dp, bottom = 8.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Новый подход")
+                                }
                             }
                         }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = { showExerciseDialog = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Добавить упражнение")
-            }
-
-            Button(
-                onClick = { showSaveDialog = true },
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-            ) {
-                Text("Сохранить тренировку")
-            }
-
-            if (showSaveDialog) {
-                AlertDialog(
-                    onDismissRequest = { showSaveDialog = false },
-                    title = { Text("Название тренировки") },
-                    text = {
-                        OutlinedTextField(
-                            value = workoutName,
-                            onValueChange = {
-                                if (it.length <= 256) { workoutName = it }
-                            },
-                            label = { Text("Что было особенного?") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    confirmButton = {
-                        Button(onClick = { saveWorkout() }) {
-                            Text("Сохранить")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showSaveDialog = false }) {
-                            Text("Отмена")
-                        }
+            if (isEditing) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { showExerciseDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Добавить упражнение")
+                }
+                if (initialData == null) {
+                    Button(
+                        onClick = { showSaveDialog = true },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) {
+                        Text("Сохранить тренировку")
                     }
-                )
+                }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
+    if (showSaveDialog && initialData == null) {
+        AlertDialog(
+            onDismissRequest = { showSaveDialog = false },
+            title = { Text("Название тренировки") },
+            text = {
+                OutlinedTextField(
+                    value = workoutName,
+                    onValueChange = { if (it.length <= 256) workoutName = it },
+                    label = { Text("Что было особенного?") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = { saveWorkout() }) {
+                    Text("Сохранить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveDialog = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 
-    val exercises = listOf(
-        "подтягивания",
-        "крюк",
-        "верх",
-        "боковое давление"
-    )
-
+    val exercises = listOf("подтягивания", "крюк", "верх", "боковое давление")
     if (showExerciseDialog) {
         AlertDialog(
             onDismissRequest = { showExerciseDialog = false },
@@ -468,21 +561,14 @@ fun WorkoutScreen(
                     exercises.forEach { exercise ->
                         TextButton(
                             onClick = {
-                                val exerciseName = exercise
-
-                                if(!workoutData.containsKey(exerciseName)) {
-                                    workoutData = workoutData + (exerciseName to emptyList<SetData>())
-                                    expandedExercise = exerciseName
-                                } else {
-                                    expandedExercise = exerciseName
+                                if (!workoutData.containsKey(exercise)) {
+                                    workoutData = workoutData + (exercise to emptyList<SetData>())
                                 }
-
+                                expandedExercise = exercise
                                 showExerciseDialog = false
                             },
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(exercise)
-                        }
+                        ) { Text(exercise) }
                     }
                 }
             },
@@ -491,22 +577,25 @@ fun WorkoutScreen(
     }
 }
 
-fun generateCalendarDays(yearMonth: YearMonth): List<LocalDate?> {
+fun generateCalendarWeeks(yearMonth: YearMonth): List<CalendarWeek> {
     val firstDayOfMonth = yearMonth.atDay(1)
     val daysInMonth = yearMonth.lengthOfMonth()
-
     val dayOfWeek = firstDayOfMonth.dayOfWeek.value
-    val calendarDays = mutableListOf<LocalDate?>()
 
-    repeat(dayOfWeek - 1) {
-        calendarDays.add(null)
-    }
+    val weeks = mutableListOf<CalendarWeek>()
+    var currentWeekDays = mutableListOf<LocalDate?>()
+
+    repeat(dayOfWeek - 1) { currentWeekDays.add(null) }
 
     for (day in 1..daysInMonth) {
-        calendarDays.add(yearMonth.atDay(day))
+        currentWeekDays.add(yearMonth.atDay(day))
+        if (currentWeekDays.size == 7 || day == daysInMonth) {
+            while (currentWeekDays.size < 7) currentWeekDays.add(null)
+            weeks.add(CalendarWeek(days = currentWeekDays.toList()))
+            currentWeekDays = mutableListOf()
+        }
     }
-
-    return calendarDays
+    return weeks
 }
 
 @Composable
@@ -516,88 +605,251 @@ fun CalendarScreen(
 ) {
     val today = LocalDate.now()
     var currentMonth by remember { mutableStateOf(YearMonth.from(today)) }
-    val calendarDays = generateCalendarDays(currentMonth)
+
+    val calendarWeeks = generateCalendarWeeks(currentMonth)
     val workoutDates = remember(savedWorkouts) {
         savedWorkouts.map {
             Instant.ofEpochMilli(it.date).atZone(ZoneId.systemDefault()).toLocalDate()
         }.toSet()
     }
 
-    Column( modifier = Modifier.fillMaxSize()) {
+    var isSwipeLocked by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    fun changeMonth(direction: Int) {
+        if (!isSwipeLocked) {
+            isSwipeLocked = true
+            currentMonth = if (direction > 0) currentMonth.plusMonths(1) else currentMonth.minusMonths(1)
+
+            coroutineScope.launch {
+                delay(400)
+                isSwipeLocked = false
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { currentMonth = currentMonth.minusMonths(1) }) {
+            IconButton(onClick = { changeMonth(-1) }) {
                 Icon(Icons.Default.ArrowBack, "Предыдущий месяц")
             }
-
-            val monthName = currentMonth.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale("ru")))
-
             Text(
-                text = monthName,
+                text = currentMonth.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale("ru"))),
                 style = MaterialTheme.typography.titleLarge
             )
-
-            IconButton(onClick = { currentMonth = currentMonth.plusMonths(1) }) {
+            IconButton(onClick = { changeMonth(1) }) {
                 Icon(Icons.Default.ArrowForward, "Следующий месяц")
-                }
-        }
-
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-            listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach { day ->
-                Text(
-                    text = day,
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
 
-        Divider(modifier = Modifier.padding(vertical = 4.dp))
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(7),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            items(calendarDays.size) { index ->
-                val date = calendarDays[index]
-
-                if (date == null) {
-                    Box(modifier = Modifier.aspectRatio(1f))
-                } else {
-                    val isToday = date == today
-                    val hasWorkout = workoutDates.contains(date)
-
-                    Card(
-                        modifier = Modifier
-                            .aspectRatio(1f)
-                            .clickable { onDayClick(date) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = when {
-                                isToday -> MaterialTheme.colorScheme.primaryContainer
-                                hasWorkout -> Color.Green.copy(alpha = 0.2f)
-                                else -> MaterialTheme.colorScheme.surface
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .pointerInput(Unit) {
+                    var totalDrag = 0f
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (totalDrag.absoluteValue > 200 && !isSwipeLocked) {
+                                changeMonth(if (totalDrag > 0) -1 else 1)
                             }
+                            totalDrag = 0f
+                        },
+                        onDragCancel = { totalDrag = 0f }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        totalDrag += dragAmount
+                    }
+                }
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    Box(modifier = Modifier.width(8.dp))
+                    Spacer(Modifier.width(4.dp))
+                    listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach { day ->
+                        Text(
+                            text = day,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(calendarWeeks.size) { index ->
+                        val week = calendarWeeks[index]
+                        val isHighRep = index % 2 == 0
+                        val stripColor = if (isHighRep) Color.Cyan else Color.Red
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = date.dayOfMonth.toString(),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (hasWorkout) { Color.Green } else { MaterialTheme.colorScheme.onSurface }
+                            Box(
+                                modifier = Modifier
+                                    .width(6.dp)
+                                    .height(40.dp)
+                                    .background(stripColor, RoundedCornerShape(3.dp))
                             )
+
+                            Spacer(Modifier.width(4.dp))
+
+                            week.days.forEach { date ->
+                                Box(
+                                    modifier = Modifier.weight(1f).aspectRatio(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (date != null) {
+                                        val isToday = date == today
+                                        val hasWorkout = workoutDates.contains(date)
+
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clickable { onDayClick(date) },
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = when {
+                                                    isToday -> MaterialTheme.colorScheme.primaryContainer
+                                                    hasWorkout -> Color.Green.copy(alpha = 0.2f)
+                                                    else -> MaterialTheme.colorScheme.surface
+                                                }
+                                            )
+                                        ) {
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = date.dayOfMonth.toString(),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = if (hasWorkout) Color.Green else MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.width(6.dp).height(16.dp).background(Color.Cyan, RoundedCornerShape(3.dp)))
+                Spacer(Modifier.width(4.dp))
+                Text("Многоповторная", style = MaterialTheme.typography.labelMedium)
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.width(6.dp).height(16.dp).background(Color.Red, RoundedCornerShape(3.dp)))
+                Spacer(Modifier.width(4.dp))
+                Text("Силовая", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DayWorkoutsScreen(
+    navController: NavController,
+    date: LocalDate,
+    savedWorkouts: List<SavedWorkout>,
+    onBackClick: () -> Unit,
+    onAddWorkout: () -> Unit
+) {
+    val dayStart = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    val dayEnd = dayStart + 24 * 60 * 60 * 1000
+
+    val dayWorkouts = savedWorkouts.filter {
+        it.date >= dayStart && it.date < dayEnd
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy", Locale("ru"))),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(Icons.Default.ArrowBack, "Назад")
+                    }
+                }
+            )
+        },
+
+        floatingActionButton = {
+            FloatingActionButton(onClick = onAddWorkout) {
+                Icon(Icons.Default.Add, "Добавить тренировку")
+            }
+        }
+
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentAlignment = Alignment.Center
+        ) {
+            if (dayWorkouts.isEmpty()) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.DateRange,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "Тренировок нет",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(dayWorkouts.size) { index ->
+                        val workout = dayWorkouts[index]
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { navController.navigate("workout_detail_view/${date}/${workout.name}") }
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = workout.name,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                                if (workout.exercises.isNotEmpty()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = workout.exercises.joinToString(" | "),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
