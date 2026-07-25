@@ -42,16 +42,21 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.absoluteValue
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.layout.ModifierLocalBeyondBoundsLayout
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.savedstate.serialization.saved
+import kotlin.io.path.fileVisitor
 
 
-// Импорты
 
-
-data class SetData(val reps: Int = 0, val weight: String = "")
+data class SetData(
+    val reps: Int = 0,
+    val weight: String = ""
+)
 
 data class SavedWorkout(
     val name: String,
@@ -61,6 +66,17 @@ data class SavedWorkout(
 )
 
 data class CalendarWeek(val days: List<LocalDate?>)
+
+data class RecordData(
+    val maxWeight: Double,
+    val maxReps: Int
+)
+
+data class DeleteDialogState(
+    val isVisible: Boolean = false,
+    val workoutName: String = "",
+    val workoutDate: Long = 0L
+)
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Workouts : Screen("workouts", "Тренировки", Icons.Default.Favorite)
@@ -116,9 +132,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(Screen.Records.route) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Рекорды")
-                            }
+                            RecordsScreen(savedWorkouts = savedWorkouts)
                         }
 
                         composable("workout_detail/{date}") { backStackEntry ->
@@ -144,6 +158,8 @@ class MainActivity : ComponentActivity() {
                             val name = backStackEntry.arguments?.getString("name") ?: ""
                             val coroutineScope = rememberCoroutineScope()
 
+                            var showDeleteDialog by remember { mutableStateOf(false) }
+
                             val dayStart = LocalDate.parse(dateString).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
                             val dayEnd = dayStart + 24 * 60 * 60 * 1000
 
@@ -157,6 +173,7 @@ class MainActivity : ComponentActivity() {
                                     initialData = workout.name to workout.exercises,
                                     initialSetsData = workout.setsData,
                                     isEditing = true,
+                                    onDeleteWorkout = { showDeleteDialog = true },
                                     onWorkoutSaved = { updatedName, updatedData ->
                                         savedWorkouts = savedWorkouts.map { w ->
                                             if (w.date == workout.date && w.name == workout.name) {
@@ -169,8 +186,31 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 )
+
+                                if (showDeleteDialog) {
+                                    AlertDialog(
+                                        onDismissRequest = { showDeleteDialog = false },
+                                        title = { Text("Подтверждение") },
+                                        text = { Text("Вы действительно хотите удалить \"$name\"?") },
+                                        confirmButton = {
+                                            Button(onClick = {
+                                                savedWorkouts = savedWorkouts.filterNot { w ->
+                                                    w.date == workout.date && w.name == workout.name
+                                                }
+                                                showDeleteDialog = false
+                                                navController.popBackStack()
+                                            }) { Text("Удалить") }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { showDeleteDialog = false }) {
+                                                Text("Отмена")
+                                            }
+                                        }
+                                    )
+                                }
+
                             } else {
-                                LaunchedEffect(Unit) { navController.popBackStack() }
+                                Box(modifier = Modifier.fillMaxSize())
                             }
                         }
 
@@ -193,7 +233,6 @@ class MainActivity : ComponentActivity() {
 }
 
 
-// Главный экран
 @Composable
 fun WorkoutsApp(
     navController: NavController,
@@ -289,7 +328,8 @@ fun WorkoutScreen(
     onWorkoutSaved: ((String, Map<String, List<SetData>>) -> Unit)? = null,
     initialData: Pair<String, List<String>>? = null,
     initialSetsData: Map<String, List<SetData>>? = null,
-    isEditing: Boolean = true
+    isEditing: Boolean = true,
+    onDeleteWorkout: (() -> Unit)? = null
 ) {
     var workoutData by remember {
         mutableStateOf<Map<String, List<SetData>>>(
@@ -347,7 +387,7 @@ fun WorkoutScreen(
             if (initialData != null) {
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar(
-                        message = "Изменения прмиенены",
+                        message = "Изменения применены",
                         duration = SnackbarDuration.Long
                     )
                     delay(3000)
@@ -369,9 +409,27 @@ fun WorkoutScreen(
             )
         },
         floatingActionButton = {
-            if (isEditing && initialData != null && onWorkoutSaved != null) {
-                FloatingActionButton(onClick = { saveWorkout() }) {
-                    Icon(Icons.Default.Check, "Применить изменения")
+            if (isEditing && initialData != null) {
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    FloatingActionButton(
+                        onClick = onDeleteWorkout ?: {},
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 32.dp)
+                    ) {
+                        Icon(Icons.Default.Delete, "Удалить")
+                    }
+
+                    FloatingActionButton(
+                        onClick = { saveWorkout() },
+                        modifier = Modifier.align(Alignment.BottomEnd)
+                    ) {
+                        Icon(Icons.Default.Check, "Применить изменения")
+                    }
                 }
             }
         },
@@ -400,7 +458,9 @@ fun WorkoutScreen(
 
             allExercises.forEach { exercise ->
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
@@ -497,7 +557,9 @@ fun WorkoutScreen(
                             if (isEditing) {
                                 TextButton(
                                     onClick = { addSetForExercise(exercise) },
-                                    modifier = Modifier.align(Alignment.Start).padding(start = 16.dp, bottom = 8.dp)
+                                    modifier = Modifier
+                                        .align(Alignment.Start)
+                                        .padding(start = 16.dp, bottom = 8.dp)
                                 ) {
                                     Icon(Icons.Default.Add, null, Modifier.size(18.dp))
                                     Spacer(Modifier.width(4.dp))
@@ -510,16 +572,20 @@ fun WorkoutScreen(
             }
             if (isEditing) {
                 Spacer(modifier = Modifier.height(16.dp))
+
                 Button(
                     onClick = { showExerciseDialog = true },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Добавить упражнение")
                 }
+
                 if (initialData == null) {
                     Button(
                         onClick = { showSaveDialog = true },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
                     ) {
                         Text("Сохранить тренировку")
                     }
@@ -634,7 +700,9 @@ fun CalendarScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -670,7 +738,9 @@ fun CalendarScreen(
                 }
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                Row(modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)) {
                     Box(modifier = Modifier.width(8.dp))
                     Spacer(Modifier.width(4.dp))
                     listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach { day ->
@@ -693,7 +763,9 @@ fun CalendarScreen(
                         val stripColor = if (isHighRep) Color.Cyan else Color.Red
 
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
@@ -707,7 +779,9 @@ fun CalendarScreen(
 
                             week.days.forEach { date ->
                                 Box(
-                                    modifier = Modifier.weight(1f).aspectRatio(1f),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (date != null) {
@@ -751,7 +825,10 @@ fun CalendarScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.width(6.dp).height(16.dp).background(Color.Cyan, RoundedCornerShape(3.dp)))
+                Box(modifier = Modifier
+                    .width(6.dp)
+                    .height(16.dp)
+                    .background(Color.Cyan, RoundedCornerShape(3.dp)))
                 Spacer(Modifier.width(4.dp))
                 Text("Многоповторная", style = MaterialTheme.typography.labelMedium)
             }
@@ -759,7 +836,10 @@ fun CalendarScreen(
             Spacer(Modifier.width(16.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.width(6.dp).height(16.dp).background(Color.Red, RoundedCornerShape(3.dp)))
+                Box(modifier = Modifier
+                    .width(6.dp)
+                    .height(16.dp)
+                    .background(Color.Red, RoundedCornerShape(3.dp)))
                 Spacer(Modifier.width(4.dp))
                 Text("Силовая", style = MaterialTheme.typography.labelMedium)
             }
@@ -855,6 +935,129 @@ fun DayWorkoutsScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecordsScreen(savedWorkouts: List<SavedWorkout>) {
+    val trackedExercises = listOf("подтягивания", "крюк", "верх", "боковое давление")
+
+    val records = remember(savedWorkouts) {
+        trackedExercises.associateWith { exercise ->
+            var maxWeight = 0.0
+            var maxReps = 0
+
+            savedWorkouts.forEach { workout ->
+                workout.setsData[exercise]?.forEach { setData ->
+                    val weight = setData.weight.toDoubleOrNull() ?: 0.0
+
+
+                    if (weight > maxWeight || (weight == maxWeight && setData.reps > maxReps)) {
+                        maxWeight = weight
+                        maxReps = setData.reps
+                    }
+                }
+            }
+
+            RecordData(maxWeight = maxWeight, maxReps = maxReps)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Мои рекорды",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(top = 32.dp, bottom = 24.dp)
+        )
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(trackedExercises.size) { index ->
+                val exercise = trackedExercises[index]
+                val record = records[exercise] ?: RecordData(maxWeight = 0.0, maxReps = 0)
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = exercise.replaceFirstChar { it.uppercase() },
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "Макс. вес",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = if (record.maxWeight > 0.0) { "${record.maxWeight}" } else { "-" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            HorizontalDivider(
+                                modifier = Modifier
+                                    .height(40.dp)
+                                    .width(1.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "Макс. повт.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = if (record.maxReps > 0) { "${record.maxReps}" } else { "-" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (savedWorkouts.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp)
+                    ) {
+                        Text(
+                            text = "Добавьте первую тренировку,\nчтобы увидеть рекорды",
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
