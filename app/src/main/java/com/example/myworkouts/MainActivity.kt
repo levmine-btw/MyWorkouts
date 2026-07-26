@@ -59,6 +59,7 @@ data class SetData(
 )
 
 data class SavedWorkout(
+    val id : Long = System.currentTimeMillis(),
     val name: String,
     val exercises: List<String>,
     val date: Long,
@@ -68,15 +69,11 @@ data class SavedWorkout(
 data class CalendarWeek(val days: List<LocalDate?>)
 
 data class RecordData(
-    val maxWeight: Double,
-    val maxReps: Int
+    val maxWeight: Double = 0.0,
+    val maxReps: Int = 0,
+    val workoutId: Long = 0L
 )
 
-data class DeleteDialogState(
-    val isVisible: Boolean = false,
-    val workoutName: String = "",
-    val workoutDate: Long = 0L
-)
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Workouts : Screen("workouts", "Тренировки", Icons.Default.Favorite)
@@ -97,17 +94,24 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     bottomBar = {
                         NavigationBar {
-                            val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+                            val navBackStackEntry by navController.currentBackStackEntryAsState()
+                            val currentRoute = navBackStackEntry?.destination?.route
+
                             bottomNavItems.forEach { screen ->
                                 NavigationBarItem(
-                                    icon = { Icon(screen.icon, contentDescription = screen.title) },
-                                    label = { Text(screen.title) },
+                                    icon = { Icon(imageVector = screen.icon, contentDescription = screen.title) },
+                                    label = { Text(text = screen.title) },
                                     selected = currentRoute == screen.route,
                                     onClick = {
+                                        if (currentRoute == screen.route) { return@NavigationBarItem }
+
                                         navController.navigate(screen.route) {
-                                            popUpTo(Screen.Workouts.route) { saveState = true }
+                                            popUpTo(navController.graph.startDestinationId) {
+                                                saveState = true
+                                            }
+
                                             launchSingleTop = true
-                                            restoreState = true
+                                            restoreState = false
                                         }
                                     }
                                 )
@@ -132,7 +136,10 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(Screen.Records.route) {
-                            RecordsScreen(savedWorkouts = savedWorkouts)
+                            RecordsScreen(
+                                savedWorkouts = savedWorkouts,
+                                navController = navController
+                            )
                         }
 
                         composable("workout_detail/{date}") { backStackEntry ->
@@ -153,21 +160,17 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        composable("workout_detail_view/{date}/{name}") { backStackEntry ->
-                            val dateString = backStackEntry.arguments?.getString("date") ?: ""
-                            val name = backStackEntry.arguments?.getString("name") ?: ""
-                            val coroutineScope = rememberCoroutineScope()
+                        composable("workout_detail_view/{id}") { backStackEntry ->
+                            val idStr = backStackEntry.arguments?.getString("id")
+                            val workoutId = idStr?.toLongOrNull() ?: 0L
 
                             var showDeleteDialog by remember { mutableStateOf(false) }
+                            var isDeleting by remember { mutableStateOf(false) }
+                            val coroutineScope = rememberCoroutineScope()
 
-                            val dayStart = LocalDate.parse(dateString).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                            val dayEnd = dayStart + 24 * 60 * 60 * 1000
+                            val workout = savedWorkouts.firstOrNull { it.id == workoutId }
 
-                            val workout = savedWorkouts.firstOrNull {
-                                it.date >= dayStart && it.date < dayEnd && it.name == name
-                            }
-
-                            if (workout != null) {
+                            if (workout != null && !isDeleting) {
                                 WorkoutScreen(
                                     onBackClick = { navController.popBackStack() },
                                     initialData = workout.name to workout.exercises,
@@ -176,8 +179,14 @@ class MainActivity : ComponentActivity() {
                                     onDeleteWorkout = { showDeleteDialog = true },
                                     onWorkoutSaved = { updatedName, updatedData ->
                                         savedWorkouts = savedWorkouts.map { w ->
-                                            if (w.date == workout.date && w.name == workout.name) {
-                                                SavedWorkout(updatedName, updatedData.keys.toList(), w.date, updatedData)
+                                            if (w.id == workout.id) {
+                                                SavedWorkout(
+                                                    id = w.id,
+                                                    name = updatedName,
+                                                    exercises = updatedData.keys.toList(),
+                                                    date = w.date,
+                                                    setsData = updatedData
+                                                )
                                             } else w
                                         }
                                         coroutineScope.launch {
@@ -191,13 +200,14 @@ class MainActivity : ComponentActivity() {
                                     AlertDialog(
                                         onDismissRequest = { showDeleteDialog = false },
                                         title = { Text("Подтверждение") },
-                                        text = { Text("Вы действительно хотите удалить \"$name\"?") },
+                                        text = { Text("Вы действительно хотите удалить \"${workout.name}\"?") },
                                         confirmButton = {
                                             Button(onClick = {
-                                                savedWorkouts = savedWorkouts.filterNot { w ->
-                                                    w.date == workout.date && w.name == workout.name
-                                                }
+                                                isDeleting = true
                                                 showDeleteDialog = false
+
+
+                                                savedWorkouts = savedWorkouts.filterNot { w -> w.id == workout.id }
                                                 navController.popBackStack()
                                             }) { Text("Удалить") }
                                         },
@@ -208,9 +218,12 @@ class MainActivity : ComponentActivity() {
                                         }
                                     )
                                 }
-
-                            } else {
+                            } else if (isDeleting) {
                                 Box(modifier = Modifier.fillMaxSize())
+                            } else {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Тренировка не найдена (ID: $workoutId)")
+                                }
                             }
                         }
 
@@ -285,7 +298,7 @@ fun WorkoutsApp(
                         val workout = todayWorkouts[index]
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { navController.navigate("workout_detail_view/${today}/${workout.name}") }
+                            onClick = { navController.navigate("workout_detail_view/${workout.id}") }
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
@@ -400,7 +413,11 @@ fun WorkoutScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (isEditing) "Тренировка" else "Просмотр") },
+                title = {
+                    Text(
+                        text = if (isEditing && initialData != null) { initialData.first } else { "Новая тренировка" },
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.Default.ArrowBack, "Назад")
@@ -918,7 +935,7 @@ fun DayWorkoutsScreen(
                         val workout = dayWorkouts[index]
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { navController.navigate("workout_detail_view/${date}/${workout.name}") }
+                            onClick = { navController.navigate("workout_detail_view/${workout.id}") }
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
@@ -943,13 +960,17 @@ fun DayWorkoutsScreen(
 }
 
 @Composable
-fun RecordsScreen(savedWorkouts: List<SavedWorkout>) {
+fun RecordsScreen(
+    savedWorkouts: List<SavedWorkout>,
+    navController: NavController
+    ) {
     val trackedExercises = listOf("подтягивания", "крюк", "верх", "боковое давление")
 
     val records = remember(savedWorkouts) {
         trackedExercises.associateWith { exercise ->
             var maxWeight = 0.0
             var maxReps = 0
+            var recordId = 0L
 
             savedWorkouts.forEach { workout ->
                 workout.setsData[exercise]?.forEach { setData ->
@@ -959,11 +980,12 @@ fun RecordsScreen(savedWorkouts: List<SavedWorkout>) {
                     if (weight > maxWeight || (weight == maxWeight && setData.reps > maxReps)) {
                         maxWeight = weight
                         maxReps = setData.reps
+                        recordId = workout.id
                     }
                 }
             }
 
-            RecordData(maxWeight = maxWeight, maxReps = maxReps)
+            RecordData(maxWeight = maxWeight, maxReps = maxReps, workoutId = recordId)
         }
     }
 
@@ -988,7 +1010,14 @@ fun RecordsScreen(savedWorkouts: List<SavedWorkout>) {
                 val record = records[exercise] ?: RecordData(maxWeight = 0.0, maxReps = 0)
 
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (record.workoutId > 0) {
+                                navController.navigate("workout_detail_view/${record.workoutId}")
+                            } else {
+                            }
+                        },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                     )
