@@ -3,6 +3,8 @@ package com.example.myworkouts
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +25,8 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf<List<SavedWorkout>>(emptyList())
                 }
 
+                val snackbarHostState = remember { SnackbarHostState() }
+
                 MyWorkoutsNavGraph(
                     navController = navController,
                     savedWorkouts = savedWorkouts,
@@ -36,7 +40,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onWorkoutDeleted = { id ->
                         savedWorkouts = savedWorkouts.filterNot { it.id == id }
-                    }
+                    },
+                    snackbarHostState = snackbarHostState
                 )
             }
         }

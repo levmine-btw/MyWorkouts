@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -40,6 +41,7 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -51,11 +53,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.myworkouts.data.models.SetData
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlin.collections.forEachIndexed
 import kotlin.collections.plus
 import kotlin.collections.toMutableList
@@ -69,7 +75,8 @@ fun WorkoutScreen(
     initialData: Pair<String, List<String>>? = null,
     initialSetsData: Map<String, List<SetData>>? = null,
     isEditing: Boolean = true,
-    onDeleteWorkout: (() -> Unit)? = null
+    onDeleteWorkout: (() -> Unit)? = null,
+    coroutineScope: CoroutineScope? = null
 ) {
     var workoutData by remember {
         mutableStateOf<Map<String, List<SetData>>>(
@@ -78,6 +85,7 @@ fun WorkoutScreen(
     }
 
     var showExerciseDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     var expandedExercise by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
     val allExercises = workoutData.keys.toList()
@@ -179,14 +187,29 @@ fun WorkoutScreen(
         },
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState) { data ->
-                Snackbar(
-                    snackbarData = data,
+                Box(
                     modifier = Modifier
-                        .padding(horizontal = 32.dp, vertical = 8.dp),
-                    containerColor = MaterialTheme.colorScheme.inverseSurface,
-                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-                    shape = RoundedCornerShape(16.dp)
-                )
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        modifier = Modifier.widthIn(max = 250.dp),
+                        shape = RoundedCornerShape(50.dp),
+                        color = MaterialTheme.colorScheme.inverseSurface
+                    ) {
+                        Text(
+                            text = data.visuals.message,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 10.dp),
+                            color = MaterialTheme.colorScheme.inverseOnSurface,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
     ) { innerPadding ->
@@ -387,6 +410,31 @@ fun WorkoutScreen(
                 }
             },
             confirmButton = {}
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Подтверждение") },
+            text = { Text("Вы действительно хотите удалить \"${workoutName}\"?") },
+            confirmButton = {
+                Button(onClick = {
+                    showDeleteDialog = false
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = "Тренировка удалена",
+                            duration = SnackbarDuration.Short
+                        )
+                        onDeleteWorkout?.invoke()
+                    }
+                }) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Отмена")
+                }
+            }
         )
     }
 }
