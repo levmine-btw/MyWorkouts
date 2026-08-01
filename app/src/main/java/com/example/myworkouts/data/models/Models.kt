@@ -4,16 +4,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.graphics.vector.ImageVector
+import kotlinx.serialization.Serializable
 import java.time.LocalDate
 
-
+@Serializable
 data class SetData(
     val reps: Int = 0,
     val weight: String = ""
 )
 
+@Serializable
 data class SavedWorkout(
     val id : Long = System.currentTimeMillis(),
     val name: String,
@@ -31,8 +32,16 @@ data class RecordData(
 )
 
 
-sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
+sealed class Screen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Workouts : Screen("workouts", "Тренировки", Icons.Default.Favorite)
     object Calendar : Screen("calendar", "Календарь", Icons.Default.DateRange)
-    object Records : Screen("records", "Рекорды", Icons.Default.Star)
+    object Profile : Screen("profile", "Профиль", Icons.Default.Person)
+
+    object Stats : Screen("profile/stats", "Статистика")
+    object Exercises : Screen("profile/exercises", "Упражнения")
+    object Records : Screen("profile/records", "Рекорды")
+    object Settings : Screen("profile/settings", "Настройки")
+    object Personalization : Screen("profile/settings/personalization", "Персонализация")
+    object Security : Screen("profile/settings/security", "Безопасность")
+    object About : Screen("profile/settings/about", "О приложении")
 }

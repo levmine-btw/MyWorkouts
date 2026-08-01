@@ -37,7 +37,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -61,10 +60,6 @@ import com.example.myworkouts.data.models.SetData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
-import kotlin.collections.forEachIndexed
-import kotlin.collections.plus
-import kotlin.collections.toMutableList
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -299,10 +294,14 @@ fun WorkoutScreen(
                                         OutlinedTextField(
                                             value = set.weight,
                                             onValueChange = { text ->
-                                                if (text.all { it.isDigit() || it == '.' }) {
-                                                    if (text.count { it == '.' } <= 1) {
-                                                        updateSetWeight(exercise, index, text)
+                                                if (text.all { it.isDigit() || it == '.' } && text.count { it == '.' } <= 1) {
+                                                    val correctText = when {
+                                                        text.isEmpty() -> ""
+                                                        text == "0" || text == "0." -> text
+                                                        text.startsWith("0") && !text.startsWith("0.") -> text.removePrefix("0")
+                                                        else -> text
                                                     }
+                                                    updateSetWeight(exercise, index, correctText)
                                                 }
                                             },
                                             label = { Text("Вес") },
