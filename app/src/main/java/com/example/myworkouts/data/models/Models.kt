@@ -20,7 +20,12 @@ data class SavedWorkout(
     val name: String,
     val exercises: List<String>,
     val date: Long,
-    val setsData: Map<String, List<SetData>> = emptyMap()
+    val setsData: Map<String, List<SetData>> = emptyMap(),
+
+    val isStartDrill: Boolean = false,
+    val startDurationMs: Long = 0L,
+
+    val startDrillDurationMs: Long? = null
 )
 
 data class CalendarWeek(val days: List<LocalDate?>)

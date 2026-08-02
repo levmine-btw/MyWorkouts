@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -101,14 +102,23 @@ fun WorkoutsApp(
         }
 
         Button(
-            onClick = {
-                navController.navigate("workout_detail/$today")
-            },
+            onClick = { navController.navigate("workout_detail/$today") },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text("Добавить тренировку")
         }
+
+        Button(
+            onClick = { navController.navigate("start_training") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text("Добавить отработку старта")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }

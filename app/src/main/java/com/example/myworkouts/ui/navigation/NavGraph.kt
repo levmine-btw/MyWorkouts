@@ -58,6 +58,7 @@ import com.example.myworkouts.ui.profile.ProfileScreen
 import com.example.myworkouts.ui.profile.SecurityScreen
 import com.example.myworkouts.ui.profile.SettingsScreen
 import com.example.myworkouts.ui.profile.StatsScreen
+import com.example.myworkouts.ui.screens.StartTrainingScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -194,6 +195,10 @@ fun MyWorkoutsNavGraph(
                 AboutScreen(navController = navController)
             }
 
+            composable("start_training") {
+                StartTrainingScreen(navController = navController)
+            }
+
             composable(
                 route = "day_workouts/{date}",
                 arguments = listOf(navArgument("date") { type = NavType.StringType })
@@ -217,8 +222,11 @@ fun MyWorkoutsNavGraph(
             ) { backStackEntry ->
                 val dateStr = backStackEntry.arguments?.getString("date") ?: ""
                 val date = LocalDate.parse(dateStr)
+
                 WorkoutScreen(
                     onBackClick = { navController.popBackStack() },
+                    onStartDrillClick = { navController.navigate("start_training") },
+
                     onWorkoutSaved = { name, setsData ->
                         val newWorkout = SavedWorkout(
                             name = name,
